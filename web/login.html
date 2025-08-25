@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>登录 · 自由乌托邦 Free Utopia</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/guard.js?v=2"></script>
+</head>
+<body class="center">
+  <div class="card">
+    <h1 class="title"><span class="brand">自由乌托邦 Free Utopia</span></h1>
+    <p class="muted">欢迎登录 · 使用你的用户名与密码，或先注册一个账号。</p>
+    <div class="col" style="margin-top:16px">
+      <input id="username" class="input" placeholder="用户名" />
+      <input id="password" type="password" class="input" placeholder="密码" />
+      <div class="toolbar">
+        <button id="btnLogin" class="btn">登录</button>
+        <a href="/register.html" class="btn secondary">去注册</a>
+  <button id="themeToggle" class="btn secondary" style="margin-left:auto" title="切换主题">切换主题</button>
+      </div>
+      <div id="msg" class="muted"></div>
+    </div>
+  </div>
+<script>
+(async function(){
+  let token = localStorage.getItem('token') || ''
+  if(token){
+    try{
+      const r = await fetch('/api/me', { headers:{ authorization:'Bearer '+token } })
+      if(r.ok){ location.href = '/chat.html'; return }
+      else { localStorage.removeItem('token') }
+    }catch{ localStorage.removeItem('token') }
+  }
+})()
+async function login(){
+  const username = document.getElementById('username').value.trim()
+  const password = document.getElementById('password').value
+  if(username.length < 3){ document.getElementById('msg').textContent = '用户名至少3个字符'; return }
+  if(password.length < 6){ document.getElementById('msg').textContent = '密码至少6个字符'; return }
+  const r = await fetch('/api/login', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password }) })
+  const j = await r.json()
+  if(r.ok && j.token){ localStorage.setItem('token', j.token); location.href = '/chat.html' }
+  else if(r.status===409 && j?.code==='SESSION_EXISTS'){
+    const yes = confirm('检测到已有在线会话，是否挤掉旧会话并登录？')
+    if(yes){
+      const r2 = await fetch('/api/login', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password, force: true }) })
+      const j2 = await r2.json()
+      if(r2.ok && j2.token){ localStorage.setItem('token', j2.token); location.href = '/chat.html' }
+      else { document.getElementById('msg').textContent = j2?.error || '登录失败' }
+    } else {
+      document.getElementById('msg').textContent = '已取消登录'
+    }
+  }
+  else { document.getElementById('msg').textContent = j?.error || '登录失败' }
+}
+ document.getElementById('btnLogin').onclick = login
+   // theme toggle (cyber -> light -> dark)
+  function applyTheme(theme){
+    const root = document.documentElement
+    if(theme==='light' || theme==='cyber'){ root.setAttribute('data-theme', theme) }
+    else { root.removeAttribute('data-theme') }
+    const label = theme==='cyber' ? '赛博朋克' : (theme==='light' ? '亮色' : '暗色')
+    const btn = document.getElementById('themeToggle'); if(btn){ btn.textContent = '主题：' + label }
+  }
+  const modes = ['cyber','light','dark']
+  let curTheme = localStorage.getItem('theme') || 'cyber'
+  if(!modes.includes(curTheme)) curTheme = 'cyber'
+  applyTheme(curTheme)
+  document.getElementById('themeToggle').onclick = ()=>{
+    const idx = modes.indexOf(curTheme)
+    curTheme = modes[(idx+1)%modes.length]
+    localStorage.setItem('theme', curTheme)
+    applyTheme(curTheme)
+  }
+</script>
+</body>
+</html>
