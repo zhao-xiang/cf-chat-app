@@ -1,0 +1,486 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>聊天 · 自由乌托邦 Free Utopia</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/guard.js?v=2"></script>
+</head>
+<body>
+  <div class="app">
+  <aside class="panel sidebar">
+      <div class="row" style="justify-content:space-between">
+        <div>在线人数：<span id="online" class="count">0</span></div>
+      </div>
+      <ul id="users" class="user-list"></ul>
+    </aside>
+
+    <section class="panel main">
+      <div class="header">
+        <div class="row" style="gap:12px; align-items:center">
+          <span class="brand small">自由乌托邦 · Free Utopia</span>
+          <select id="scope" class="select compact" style="max-width:180px">
+            <option value="public">公共聊天</option>
+            <option value="private">私聊</option>
+            <option value="ai">问AI</option>
+          </select>
+          <input id="toUser" class="input" placeholder="私聊对象用户名" style="width:260px; display:none" />
+        </div>
+        <div class="row" style="gap:8px; align-items:center">
+          <div class="muted" id="self"></div>
+          <button id="toggleSidebar" class="btn secondary mobile-only" title="在线列表">在线列表</button>
+          <button id="themeToggle" class="btn secondary" title="切换主题">切换主题</button>
+          <a class="btn secondary" href="/account.html">账号管理</a>
+          <button id="logout" class="btn danger">退出</button>
+        </div>
+      </div>
+      <div id="log" class="messages"></div>
+      <div class="composer">
+        <button id="emojiBtn" class="btn secondary" title="表情">😊 表情</button>
+        <label for="file" class="btn secondary" title="上传文件">📎 文件</label>
+        <input type="file" id="file" class="file-hidden" />
+        <div id="emojiPanel" class="emoji-panel" style="display:none"></div>
+        <textarea id="input" class="textarea" placeholder="在此输入您要发送的消息"></textarea>
+        <button id="send" class="btn ml-auto">发送 (Ctrl+Enter)</button>
+      </div>
+    </section>
+  </div>
+<script>
+let token = localStorage.getItem('token') || ''
+if(!token){ location.href = '/login' }
+let ws
+let currentUser = ''
+// 线程存储：public / ai / dm:<username>
+const threads = {}
+// 未读 DM 计数
+const unreadDM = {}
+// 规范化用户名
+const normalize = (s)=> String(s||'').trim().toLowerCase()
+
+function getThread(key){ if(!threads[key]) threads[key]=[]; return threads[key] }
+function currentThreadKey(){
+  const v = document.getElementById('scope').value
+  if(v==='public') return 'public'
+  if(v==='ai') return 'ai'
+  const to = (document.getElementById('toUser').value||'').trim().toLowerCase()
+  return to? ('dm:'+to) : 'dm:'
+}
+function threadKeyForIncoming(msg){
+  if(msg.kind==='ai' || msg.from==='AI' || msg.room==='ai') return 'ai'
+  if(!msg.to) return 'public'
+  const other = (msg.from===currentUser) ? (msg.to||'') : (msg.from||'')
+  return 'dm:' + String(other||'').toLowerCase()
+}
+function clearLog(){ const log = document.getElementById('log'); log.innerHTML='' }
+function renderThread(key){
+  clearLog()
+  const list = threads[key]||[]
+  list.forEach(m=>{
+  if(m.kind==='image' || m.kind==='video' || m.kind==='file') addMediaMessage(m)
+    else addTextMessage(m)
+  })
+}
+function renderCurrent(){
+  const key = currentThreadKey()
+  renderThread(key)
+  if(key.startsWith('dm:')){ unreadDM[key]=0; updateUnreadUI() }
+  const log=document.getElementById('log'); log.scrollTop=log.scrollHeight
+}
+
+function formatTime(ts){
+  try{ return new Date(ts || Date.now()).toLocaleString() }catch{ return '' }
+}
+
+// Sanitize helpers for media URLs and filenames
+function sanitizeMediaUrl(u){
+  let s = String(u||'').trim()
+  // strip wrapping quotes/braces/parentheses
+  s = s.replace(/^["']+|["'}\)]+$/g, '')
+  // keep only from /media/... if a domain or other prefix sneaks in
+  const i = s.indexOf('/media/')
+  if(i>=0) s = s.slice(i)
+  return s
+}
+function sanitizeFilename(n){
+  let s = String(n||'').trim()
+  s = s.replace(/^["']+|["'}\)]+$/g, '')
+  return s
+}
+
+function renderPresence(online, users){
+  document.getElementById('online').textContent = online
+  const ul = document.getElementById('users'); ul.innerHTML=''
+  users.forEach(u=>{
+    const li=document.createElement('li'); li.className='chip'; li.dataset.username = normalize(u)
+    const name=document.createElement('span'); name.textContent=u; li.appendChild(name)
+    const badge=document.createElement('span'); badge.className='badge'; badge.style.display='none'; li.appendChild(badge)
+    if(u===currentUser){ li.classList.add('muted') }
+    else{
+      li.title = '点击私聊'
+      li.onclick = ()=>{
+        const scopeSel = document.getElementById('scope')
+        const to = document.getElementById('toUser')
+        scopeSel.value = 'private'
+        to.value = u
+        to.style.display = 'block'
+        // 清零未读
+        const key = 'dm:' + normalize(u)
+        unreadDM[key] = 0
+        updateUnreadUI()
+        renderCurrent()
+        document.getElementById('input').focus()
+        // 选择用户后在移动端收起侧栏
+        document.body.classList.remove('sidebar-open')
+      }
+    }
+    ul.appendChild(li)
+  })
+  updateUnreadUI()
+}
+
+function updateUnreadUI(){
+  const ul = document.getElementById('users')
+  ul.querySelectorAll('li.chip').forEach(li=>{
+    const key = 'dm:' + (li.dataset.username || '')
+    const cnt = unreadDM[key] || 0
+    const badge = li.querySelector('.badge')
+    if(!badge) return
+    if(cnt>0){ badge.textContent = String(cnt); badge.style.display='inline-flex'; badge.classList.add('blink') }
+    else { badge.textContent=''; badge.style.display='none'; badge.classList.remove('blink') }
+  })
+}
+function addTextMessage({from,to,room,content,isMe,ts,kind}){
+  const wrap = document.createElement('div'); wrap.className = 'bubble'+(isMe?' me':'')
+  const body = document.createElement('div')
+  const prefix = to ? `${from}->${to}: ` : `${from}: `
+  if(kind==='emoji'){
+    const pre = document.createElement('span'); pre.textContent = prefix; body.appendChild(pre)
+    const em = document.createElement('span'); em.textContent = content; em.className='emoji-text'; body.appendChild(em)
+  } else {
+    body.textContent = `${prefix}${content}`
+  }
+  const meta = document.createElement('div'); meta.className='muted meta'; meta.textContent = formatTime(ts)
+  wrap.appendChild(body); wrap.appendChild(meta)
+  const log = document.getElementById('log'); log.appendChild(wrap); log.scrollTop = log.scrollHeight
+}
+function addMediaMessage({from,to,room,kind,content,isMe,ts,size,name}){
+  const wrap = document.createElement('div'); wrap.className = 'bubble'+(isMe?' me':'')
+  const prefix = to ? `${from}->${to}: ` : `${from}: `
+  const label = document.createElement('div'); label.textContent = prefix; label.style.marginBottom = '6px'
+  wrap.appendChild(label)
+  if(kind==='image'){
+  const urlSafe = sanitizeMediaUrl(content)
+  const img=document.createElement('img'); img.src=urlSafe; img.className='thumb';
+    img.style.cursor='zoom-in'
+    img.onclick = (e)=>{
+      // build lightbox elements
+      const backdrop = document.createElement('div'); backdrop.className='lightbox-backdrop'
+      const closeBtn = document.createElement('button'); closeBtn.className='lightbox-close'; closeBtn.textContent='关闭'
+      const big = document.createElement('img'); big.src=content; big.className='lightbox-img'
+      let scale = 1, startX=0, startY=0, imgX=0, imgY=0, touchStart=null, dragging=false
+      const viewport = ()=>({ w: window.innerWidth, h: window.innerHeight })
+      const imgSize = ()=>({ w: (big.naturalWidth||0) * scale, h: (big.naturalHeight||0) * scale })
+      const clamp = ()=>{
+        const vp = viewport(); const sz = imgSize()
+        const maxX = Math.max(0, (sz.w - vp.w)/2)
+        const maxY = Math.max(0, (sz.h - vp.h)/2)
+        if(Math.abs(imgX) > maxX) imgX = imgX>0 ? maxX : -maxX
+        if(Math.abs(imgY) > maxY) imgY = imgY>0 ? maxY : -maxY
+      }
+      const applyTransform = ()=>{ clamp(); big.style.transform = `translate(${imgX}px, ${imgY}px) scale(${scale})` }
+      const setScale = (s, cx=null, cy=null)=>{
+        const prev = scale
+        scale = Math.min(4, Math.max(1, s))
+        // simple zoom towards center
+        if(cx!=null && cy!=null){ imgX -= (cx - (window.innerWidth/2)) * (scale - prev) * 0.02; imgY -= (cy - (window.innerHeight/2)) * (scale - prev) * 0.02 }
+        applyTransform()
+      }
+      big.ondblclick = (ev)=>{ setScale(scale>=2?1:2, ev.clientX, ev.clientY) }
+      // drag to pan when zoomed
+      big.onmousedown = (ev)=>{ if(scale<=1) return; dragging=true; startX=ev.clientX-imgX; startY=ev.clientY-imgY; const mm=(e)=>{ imgX=e.clientX-startX; imgY=e.clientY-startY; applyTransform() }; const up=()=>{ dragging=false; window.removeEventListener('mousemove',mm); window.removeEventListener('mouseup',up); applyTransform() }; window.addEventListener('mousemove',mm); window.addEventListener('mouseup',up); ev.preventDefault() }
+      // touch gestures: swipe and pinch
+      backdrop.addEventListener('touchstart', (ev)=>{
+        if(ev.touches.length===1){ touchStart = { x: ev.touches[0].clientX, y: ev.touches[0].clientY, t: Date.now(), dragging: scale>1 } }
+        if(ev.touches.length===2){ touchStart = { pinch: true, d: Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX, ev.touches[0].clientY-ev.touches[1].clientY) } }
+      }, { passive: true })
+      backdrop.addEventListener('touchmove', (ev)=>{
+        if(ev.touches.length===2 && touchStart && touchStart.pinch){
+          const d = Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX, ev.touches[0].clientY-ev.touches[1].clientY)
+          const factor = d / (touchStart.d||d)
+          setScale(scale * factor)
+          touchStart.d = d
+        } else if(ev.touches.length===1 && touchStart && touchStart.dragging){
+          const t = ev.touches[0];
+          imgX = t.clientX - touchStart.x;
+          imgY = t.clientY - touchStart.y;
+          applyTransform()
+        }
+      }, { passive: true })
+      backdrop.addEventListener('touchend', (ev)=>{
+        // simple swipe left/right to navigate
+        if(touchStart && !touchStart.pinch && touchStart.x!=null && !touchStart.dragging){
+          const dx = (ev.changedTouches && ev.changedTouches[0]) ? (ev.changedTouches[0].clientX - touchStart.x) : 0
+          const dt = Date.now() - (touchStart.t||Date.now())
+          if(Math.abs(dx) > 60 && dt < 500){
+            navigate(dx<0 ? 1 : -1)
+          }
+        }
+        applyTransform()
+        touchStart = null
+      })
+      const navigate = (dir)=>{
+        // collect current thread images
+        const curKey = currentThreadKey(); const imgs = (threads[curKey]||[]).filter(it=>it.kind==='image')
+        const idx = imgs.findIndex(it=>it.content===content)
+        const next = imgs[idx+dir]
+        if(next){ content = next.content; big.src = content; scale=1; imgX=0; imgY=0; applyTransform() }
+      }
+      const cleanup = ()=>{ document.removeEventListener('keydown', onKey) }
+      const close = ()=>{ cleanup(); try{ document.body.removeChild(backdrop) }catch{} }
+      const onKey = (ev)=>{ if(ev.key==='Escape'){ close() } else if(ev.key==='ArrowRight'){ navigate(1) } else if(ev.key==='ArrowLeft'){ navigate(-1) } }
+      document.addEventListener('keydown', onKey)
+      closeBtn.onclick = ()=>{ close() }
+      backdrop.onclick = (ev)=>{ if(ev.target===backdrop){ close() } }
+      backdrop.appendChild(closeBtn)
+      backdrop.appendChild(big)
+      document.body.appendChild(backdrop)
+    }
+    wrap.appendChild(img)
+  } else if(kind==='video'){
+    const urlSafe = sanitizeMediaUrl(content)
+    const v=document.createElement('video'); v.src=urlSafe; v.controls=true; v.className='video'; wrap.appendChild(v)
+  } else if(kind==='file'){
+    // 从 URL 中提取原始文件名：键格式为 <userId>/<timestamp>_<filename>
+    const nameFromUrl = (url)=>{
+      try{
+        const u = new URL(sanitizeMediaUrl(url), location.origin)
+        const last = decodeURIComponent((u.pathname.split('/').pop()||''))
+        const idx = last.indexOf('_')
+        const name = idx>=0 ? last.slice(idx+1) : last
+        return name || '下载文件'
+      }catch{ return '下载文件' }
+    }
+    const urlSafe = sanitizeMediaUrl(content)
+  const fname = sanitizeFilename(name) || nameFromUrl(urlSafe)
+    const a=document.createElement('a'); a.href=urlSafe; a.textContent = fname; a.target='_blank'; a.rel='noopener'; a.download = fname; wrap.appendChild(a)
+  } else {
+    const b=document.createElement('div'); b.textContent = content; wrap.appendChild(b)
+  }
+  const meta = document.createElement('div'); meta.className='muted meta'; meta.textContent = formatTime(ts)
+  wrap.appendChild(meta)
+  const log = document.getElementById('log'); log.appendChild(wrap); log.scrollTop = log.scrollHeight
+}
+async function me(){
+  const r = await fetch('/api/me', { headers: { authorization: 'Bearer '+token } })
+  const j = await r.json(); currentUser = j.username || ''; document.getElementById('self').textContent = '当前用户：'+(currentUser||'')
+}
+function connect(){
+  const proto = location.protocol==='https:'? 'wss':'ws'
+  ws = new WebSocket(`${proto}://${location.host}/ws/public?token=${encodeURIComponent(token)}`)
+  ws.onmessage = (ev)=>{
+    try{ const d = JSON.parse(ev.data)
+      if(d.type==='auth_error'){
+        alert(d.message || '会话已失效，请重新登录')
+        try{ ws && ws.close && ws.close() }catch{}
+        localStorage.removeItem('token')
+        location.href = '/login'
+        return
+      }
+      if(d.type==='error'){
+        // 普通错误仅提示，不清除登录态
+        alert(d.message || '发送失败：消息格式无效')
+        return
+      }
+      if(d.type==='presence'){ renderPresence(d.online, d.users); return }
+      if(d.type==='message'){
+        const {from,to,room,kind,content} = d
+        const isMe = currentUser && from===currentUser
+        const ts = d.created_at || Date.now()
+        const item = {from,to,room,kind,content,isMe,ts}
+        const key = threadKeyForIncoming(item)
+        getThread(key).push(item)
+        if(key.startsWith('dm:') && key!==currentThreadKey() && !isMe){
+          unreadDM[key] = (unreadDM[key]||0) + 1
+          updateUnreadUI()
+        }
+        if(key===currentThreadKey()){
+          if(kind==='image' || kind==='video' || kind==='file') addMediaMessage(item)
+          else addTextMessage(item)
+        }
+      }
+      if(d.type==='welcome'){
+        const item = {from:'系统', to:null, room:'', kind:'text', content:'欢迎 '+d.username, isMe:false, ts:Date.now()}
+        getThread('public').push(item)
+        if(currentThreadKey()==='public') addTextMessage(item)
+      }
+    }catch(e){ console.warn(e) }
+  }
+  ws.onclose = ()=>{
+    // 如果被动断开且仍在聊天页，可以提示用户
+    // 不做强制跳转，依赖 error 消息来处理；若没有 error（网络断开），留在页面即可
+  }
+}
+async function send(){
+  if(!ws || ws.readyState!==1){ addTextMessage({from:'系统', content:'未连接', isMe:false, ts:Date.now()}); return }
+  const content = document.getElementById('input').value
+  const scope = document.getElementById('scope').value
+  const room = (scope==='public'||scope==='ai') ? 'public' : 'private'
+  const to = document.getElementById('toUser').value.trim()||undefined
+  if(scope==='private' && !to){ addTextMessage({from:'系统',content:'请输入私聊对象用户名',isMe:false,ts:Date.now()}); return }
+  const file = document.getElementById('file').files[0]
+  if(scope==='ai'){
+    // 本地先回显问题并按 AI 线程归档
+    const local = {from: currentUser || '我', to:null, room:'public', kind:'text', content, isMe:true, ts:Date.now()}
+    getThread('ai').push(local)
+    if(currentThreadKey()==='ai') addTextMessage(local)
+    ws.send(JSON.stringify({ kind:'ai', room:'public', content }))
+    document.getElementById('input').value=''
+  } else if(file){
+    const fd = new FormData(); fd.append('file', file)
+    const up = await fetch('/api/upload', { method:'POST', headers:{ authorization:'Bearer '+token }, body: fd })
+    const j = await up.json()
+    const url = `/media/${encodeURIComponent(j.key)}`
+    if(scope==='ai'){
+      ws.send(JSON.stringify({ kind: j.kind, room: 'ai', to: currentUser || undefined, content: url, name: j.name }))
+    } else {
+      ws.send(JSON.stringify({ kind: j.kind, room, to, content: url, name: j.name }))
+    }
+    document.getElementById('file').value = ''
+  } else {
+    ws.send(JSON.stringify({ kind:'text', room, to, content }))
+    document.getElementById('input').value=''
+  }
+}
+
+document.getElementById('send').onclick = send
+// auto-send when file chosen
+document.getElementById('file').addEventListener('change', async (e)=>{
+  const f = e.target.files && e.target.files[0]; if(!f) return
+  // Determine scope & to like in send()
+  const scope = document.getElementById('scope').value
+  const room = (scope==='public'||scope==='ai') ? 'public' : 'private'
+  const to = document.getElementById('toUser').value.trim()||undefined
+  if(scope==='private' && !to){ return } // 没有对象则不自动发送
+  const fd = new FormData(); fd.append('file', f)
+  const up = await fetch('/api/upload', { method:'POST', headers:{ authorization:'Bearer '+token }, body: fd })
+  const j = await up.json()
+  const url = `/media/${encodeURIComponent(j.key)}`
+  if(ws && ws.readyState===1){
+    if(scope==='ai'){
+      ws.send(JSON.stringify({ kind: j.kind, room: 'ai', to: currentUser || undefined, content: url, name: j.name }))
+    } else {
+      ws.send(JSON.stringify({ kind: j.kind, room, to, content: url, name: j.name }))
+    }
+  }
+  e.target.value = ''
+})
+// Ctrl+Enter to send
+document.getElementById('input').addEventListener('keydown', (e)=>{
+  if((e.ctrlKey || e.metaKey) && e.key === 'Enter'){
+    e.preventDefault();
+    send();
+  }
+})
+// emoji panel
+const EMOJIS = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','🙂','😉','😍','😘','😗','😜','🤪','🤗','🤔','😏','😴','🤤','🤓','😎','🥳','🤠','😇','🙃','🥲','😢','😭','😡','🤬','👍','👎','👏','🙌','🙏','💪','🔥','✨','🌈','⭐','💡','🎉','🎁','🍰','🍕','🍻','☕','🍵']
+const emojiPanel = document.getElementById('emojiPanel')
+function buildEmojiPanel(){
+  emojiPanel.innerHTML=''
+  EMOJIS.forEach(e=>{
+    const b=document.createElement('button'); b.type='button'; b.textContent=e
+    b.onclick=()=>{
+      const scope = document.getElementById('scope').value
+      const to = document.getElementById('toUser').value.trim()||undefined
+      if(scope==='ai'){
+        // AI 线程不直接发送表情，插入输入框
+        document.getElementById('input').value += e; return
+      }
+      if(scope==='private' && !to){ document.getElementById('input').value += e; return }
+      const room = (scope==='public') ? 'public' : 'private'
+      if(ws && ws.readyState===1){ ws.send(JSON.stringify({ kind:'emoji', room, to, content:e })) }
+    }
+    emojiPanel.appendChild(b)
+  })
+}
+buildEmojiPanel()
+document.getElementById('emojiBtn').onclick = (ev)=>{
+  ev.stopPropagation();
+  const vis = emojiPanel.style.display!=='none'
+  emojiPanel.style.display = vis? 'none':'grid'
+}
+document.addEventListener('click', (e)=>{
+  // close emoji panel when clicking outside
+  if(!emojiPanel.contains(e.target) && e.target!==document.getElementById('emojiBtn')){
+    emojiPanel.style.display='none'
+  }
+  // close sidebar drawer on outside click (mobile)
+  if(document.body.classList.contains('sidebar-open')){
+    const sidebar = document.querySelector('.sidebar')
+    const toggle = document.getElementById('toggleSidebar')
+    if(sidebar && !sidebar.contains(e.target) && e.target!==toggle){
+      document.body.classList.remove('sidebar-open')
+    }
+  }
+})
+document.getElementById('logout').onclick = async ()=>{
+  try{ await fetch('/api/logout', { method:'POST', headers:{ authorization:'Bearer '+(localStorage.getItem('token')||'') } }) }catch{}
+  localStorage.removeItem('token'); location.href='/login'
+}
+
+document.getElementById('scope').addEventListener('change', (e)=>{
+  const v = e.target.value
+  const to = document.getElementById('toUser')
+  const isPrivate = v==='private'
+  to.style.display = isPrivate ? 'block' : 'none'
+  if(!isPrivate) to.value=''
+  renderCurrent()
+})
+document.getElementById('toUser').addEventListener('input', ()=>{ renderCurrent() })
+
+// mobile: toggle sidebar
+const toggleBtn = document.getElementById('toggleSidebar')
+if(toggleBtn){ toggleBtn.onclick = ()=>{ document.body.classList.toggle('sidebar-open') } }
+
+async function preloadHistory(){
+  const r = await fetch('/api/me/messages?limit=100', { headers:{ authorization:'Bearer '+token } })
+  const data = await r.json().catch(()=>({items:[]}))
+  const items = data.items || []
+  items.reverse().forEach(row=>{
+    const from = row.from_username || ''
+    const to = row.to_username || null
+    const room = row.room || 'public'
+    const kind = row.content_type || 'text'
+    const content = row.content || ''
+    const ts = row.created_at || Date.now()
+    const isMe = from===currentUser
+    const item = {from,to,room,kind,content,isMe,ts}
+  const key = (kind==='ai' || from==='AI' || room==='ai') ? 'ai' : (!to ? 'public' : ('dm:'+String((isMe?to:from)||'').toLowerCase()))
+    getThread(key).push(item)
+  })
+  renderCurrent()
+}
+
+me().then(preloadHistory).then(connect)
+
+// theme toggle (cyber -> light -> dark -> cyber)
+function applyTheme(theme){
+  const root = document.documentElement
+  if(theme==='light' || theme==='cyber'){ root.setAttribute('data-theme', theme) }
+  else { root.removeAttribute('data-theme') } // dark as base
+  const label = theme==='cyber' ? '赛博朋克' : (theme==='light' ? '亮色' : '暗色')
+  const btn = document.getElementById('themeToggle'); if(btn){ btn.textContent = '主题：' + label }
+}
+const modes = ['cyber','light','dark']
+let curTheme = localStorage.getItem('theme') || 'cyber'
+if(!modes.includes(curTheme)) curTheme = 'cyber'
+applyTheme(curTheme)
+document.getElementById('themeToggle').onclick = ()=>{
+  const idx = modes.indexOf(curTheme)
+  curTheme = modes[(idx+1)%modes.length]
+  localStorage.setItem('theme', curTheme)
+  applyTheme(curTheme)
+}
+</script>
+</body>
+</html>

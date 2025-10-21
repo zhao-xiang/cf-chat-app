@@ -1,0 +1,37 @@
+name = "cf-chat-app"
+main = "worker/src/index.ts"
+compatibility_date = "2024-11-20"
+workers_dev = true
+
+# Bindings
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "ChatRoom"
+
+[[migrations]]
+new_classes = ["ChatRoom"]
+tag = "v1"
+
+[[kv_namespaces]]
+binding = "SESSIONS_KV"
+id = "a172ef37188b423184556e2d2eb33123"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cf_chat_db"
+database_id = "41f2f505-ef68-4ff1-b0d4-eda698715123"
+migrations_dir = "worker/migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "cf-chat-media"
+[ai]
+binding = "AI"
+
+[observability]
+enabled = true
+
+[vars]
+
+[assets]
+directory = "./web"

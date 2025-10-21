@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>注册 · Cloudflare Chat</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/guard.js?v=2"></script>
+</head>
+<body class="center">
+  <div class="card">
+    <h1 class="title">创建账户</h1>
+    <div class="col" style="margin-top:16px">
+      <input id="username" class="input" placeholder="用户名（≥3）" />
+      <input id="password" type="password" class="input" placeholder="密码（≥6）" />
+      <div class="toolbar">
+        <button id="btnRegister" class="btn">注册</button>
+        <a href="/login.html" class="btn secondary">去登录</a>
+  <button id="themeToggle" class="btn secondary" style="margin-left:auto" title="切换主题">切换主题</button>
+      </div>
+      <div id="msg" class="muted"></div>
+    </div>
+  </div>
+<script>
+async function register(){
+  const username = document.getElementById('username').value.trim()
+  const password = document.getElementById('password').value
+  if(username.length < 3){ document.getElementById('msg').textContent = '用户名至少3个字符'; return }
+  if(password.length < 6){ document.getElementById('msg').textContent = '密码至少6个字符'; return }
+  const r = await fetch('/api/register', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password }) })
+  const j = await r.json()
+  if(r.ok && j.ok){ location.href = '/login.html' }
+  else { document.getElementById('msg').textContent = j?.error || '注册失败' }
+}
+ document.getElementById('btnRegister').onclick = register
+ // theme toggle (cyber -> light -> dark)
+function applyTheme(theme){
+  const root = document.documentElement
+  if(theme==='light' || theme==='cyber'){ root.setAttribute('data-theme', theme) }
+  else { root.removeAttribute('data-theme') }
+  const label = theme==='cyber' ? '赛博朋克' : (theme==='light' ? '亮色' : '暗色')
+  const btn = document.getElementById('themeToggle'); if(btn){ btn.textContent = '主题：' + label }
+}
+const modes = ['cyber','light','dark']
+let curTheme = localStorage.getItem('theme') || 'cyber'
+if(!modes.includes(curTheme)) curTheme = 'cyber'
+applyTheme(curTheme)
+document.getElementById('themeToggle').onclick = ()=>{
+  const idx = modes.indexOf(curTheme)
+  curTheme = modes[(idx+1)%modes.length]
+  localStorage.setItem('theme', curTheme)
+  applyTheme(curTheme)
+}
+</script>
+</body>
+</html>

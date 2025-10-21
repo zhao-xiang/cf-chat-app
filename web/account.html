@@ -1,0 +1,218 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账号 · 自由乌托邦 Free Utopia</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/guard.js?v=2"></script>
+</head>
+<body class="center">
+  <div class="card" style="max-width:1140px; width:min(96vw, 1140px)">
+  <div class="stickybar">
+      <div class="topnav">
+        <span class="brand small">自由乌托邦 · Free Utopia</span>
+      </div>
+      <div class="row" style="gap:8px; align-items:center">
+        <button id="themeToggle" class="btn secondary" title="切换主题">切换主题</button>
+        <a class="btn secondary" href="/chat.html">去聊天</a>
+        <button class="btn secondary" id="openPwdTop">修改密码</button>
+        <button id="logout" class="btn danger">退出</button>
+      </div>
+    </div>
+
+  <h1 class="title" style="margin-bottom:8px">账号管理</h1>
+    <p class="muted" id="who">加载中…</p>
+
+    <div id="alert" class="alert" style="display:none"></div>
+
+  <div class="row" style="gap:16px; align-items:flex-start; margin-top:12px; flex-wrap:wrap">
+
+  <section class="panel" style="flex:1 1 560px; padding:16px">
+  <h2 class="title" style="font-size:18px; margin: 0 0 4px">历史聊天</h2>
+  <div class="row" style="justify-content:space-between; margin:8px 0 8px; gap:8px; flex-wrap:wrap; align-items:center">
+          <div class="row" style="gap:8px">
+            <select id="type" class="select">
+              <option value="all">全部</option>
+              <option value="public">公共聊天</option>
+              <option value="private">私聊</option>
+              <option value="ai">问AI</option>
+            </select>
+            <input id="q" class="input" placeholder="搜索内容或用户名" style="width:260px" />
+            <button id="search" class="btn secondary">搜索</button>
+          </div>
+          <div class="toolbar">
+            <button id="refresh" class="btn secondary">刷新</button>
+          </div>
+        </div>
+  <div id="history" class="col" style="max-height:50vh; overflow:auto; padding:4px 2px"></div>
+        <div id="empty" class="muted" style="display:none; padding:8px">暂无记录</div>
+        <div class="row" style="justify-content:center; gap:8px; margin-top:12px">
+          <button id="prev" class="btn secondary">上一页</button>
+          <span id="pager" class="muted">第 1 页</span>
+          <button id="next" class="btn secondary">下一页</button>
+        </div>
+      </section>
+    </div>
+  </div>
+  <!-- 密码修改弹框 -->
+  <div id="pwdModal" class="modal-backdrop" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="title" style="font-size:18px; margin:0">修改密码</h3>
+        <button id="closePwd" class="btn secondary" title="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="label">当前密码</label>
+        <div class="input-group">
+          <input id="curModal" type="password" class="input" placeholder="当前密码" />
+          <button class="btn secondary toggle" id="toggleCurModal" title="显示/隐藏">👁️</button>
+        </div>
+        <label class="label">新密码 <span class="muted">（≥6，建议包含数字和大小写字母）</span></label>
+        <div class="input-group">
+          <input id="nextModal" type="password" class="input" placeholder="新密码" />
+          <button class="btn secondary toggle" id="toggleNextModal" title="显示/隐藏">👁️</button>
+        </div>
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <div id="strengthModal" class="muted">强度：-</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="submitPwd" class="btn">保存修改</button>
+        <button id="cancelPwd" class="btn secondary">取消</button>
+      </div>
+    </div>
+  </div>
+<script>
+let token = localStorage.getItem('token') || ''
+if(!token){ location.href = '/login' }
+
+const alertBox = document.getElementById('alert')
+function showAlert(type, text){
+  alertBox.className = 'alert ' + (type==='ok'?'success':'error')
+  alertBox.textContent = text
+  alertBox.style.display = 'block'
+  setTimeout(()=>{ alertBox.style.display='none' }, 3000)
+}
+
+async function who(){
+  try{
+    const r = await fetch('/api/me', { headers:{ authorization: 'Bearer '+token } })
+    const j = await r.json(); document.getElementById('who').textContent = '你好，' + (j.username||'用户')
+  }catch{ document.getElementById('who').textContent = '未登录' }
+}
+
+function strengthText(pwd){
+  let s = 0
+  if(pwd.length>=6) s++
+  if(/[A-Z]/.test(pwd)) s++
+  if(/[a-z]/.test(pwd)) s++
+  if(/\d/.test(pwd)) s++
+  if(/[^\w]/.test(pwd)) s++
+  return ['极弱','很弱','一般','良好','较强','很强'][s]
+}
+
+function openPwdModal(){
+  const m = document.getElementById('pwdModal')
+  document.getElementById('curModal').value=''
+  document.getElementById('nextModal').value=''
+  document.getElementById('strengthModal').textContent='强度：-'
+  m.style.display='flex'
+  setTimeout(()=>{ document.getElementById('curModal').focus() }, 0)
+}
+function closePwdModal(){ document.getElementById('pwdModal').style.display='none' }
+function bindModalToggles(){
+  document.getElementById('toggleCurModal').onclick = ()=>{
+    const el = document.getElementById('curModal'); el.type = el.type==='password'?'text':'password'
+  }
+  document.getElementById('toggleNextModal').onclick = ()=>{
+    const el = document.getElementById('nextModal'); el.type = el.type==='password'?'text':'password'
+  }
+  document.getElementById('nextModal').addEventListener('input', (e)=>{
+    document.getElementById('strengthModal').textContent = '强度：' + strengthText(e.target.value)
+  })
+}
+
+async function changePwd(){
+  const btn = document.getElementById('submitPwd')
+  const currentPassword = document.getElementById('curModal').value
+  const newPassword = document.getElementById('nextModal').value
+  if(currentPassword.length<6){ showAlert('err','当前密码长度不足'); return }
+  if(newPassword.length<6){ showAlert('err','新密码长度不足'); return }
+  btn.disabled = true
+  const r = await fetch('/api/me/password', { method:'POST', headers:{ 'content-type':'application/json', authorization:'Bearer '+token }, body: JSON.stringify({ currentPassword, newPassword }) })
+  const j = await r.json()
+  if(r.ok && j.ok){ showAlert('ok','修改成功'); closePwdModal() }
+  else{ showAlert('err', j?.error || '修改失败') }
+  btn.disabled = false
+}
+
+function renderHistory(items){
+  const box = document.getElementById('history'); box.innerHTML=''
+  const empty = document.getElementById('empty')
+  if(!items || items.length===0){ empty.style.display='block'; return } else { empty.style.display='none' }
+  items.forEach(m=>{
+    const item = document.createElement('div'); item.className='bubble'
+    const head = document.createElement('div'); head.className='muted'
+    head.textContent = `${m.created_at || ''} · [${m.room}] ${m.from_username}${m.to_username?('->'+m.to_username):''}`
+    const body = document.createElement('div')
+    if(m.content_type==='image' || m.content_type==='video'){
+      const a=document.createElement('a'); a.href = m.content; a.textContent = m.content_type + ' 链接'; a.target='_blank'; body.appendChild(a)
+    } else { body.textContent = m.content }
+    item.appendChild(head); item.appendChild(body); box.appendChild(item)
+  })
+}
+
+let curPage = 1
+let curType = 'all'
+let curQ = ''
+async function loadHistory(){
+  const box = document.getElementById('history'); box.innerHTML = '<div class="muted">加载中…</div>'
+  const url = new URL('/api/me/messages', location.origin)
+  url.searchParams.set('page', String(curPage))
+  url.searchParams.set('pageSize', '20')
+  if(curType) url.searchParams.set('type', curType)
+  if(curQ) url.searchParams.set('q', curQ)
+  const r = await fetch(url.toString(), { headers:{ authorization:'Bearer '+token } })
+  const j = await r.json();
+  document.getElementById('pager').textContent = `第 ${j.page||curPage} 页`
+  renderHistory(j.items)
+}
+
+document.getElementById('openPwdTop').onclick = openPwdModal
+document.getElementById('submitPwd').onclick = changePwd
+document.getElementById('closePwd').onclick = closePwdModal
+document.getElementById('cancelPwd').onclick = closePwdModal
+document.getElementById('refresh').onclick = loadHistory
+document.getElementById('search').onclick = ()=>{ curQ = document.getElementById('q').value.trim(); curPage=1; loadHistory() }
+document.getElementById('type').onchange = (e)=>{ curType = e.target.value; curPage=1; loadHistory() }
+document.getElementById('prev').onclick = ()=>{ if(curPage>1){ curPage--; loadHistory() } }
+document.getElementById('next').onclick = ()=>{ curPage++; loadHistory() }
+document.getElementById('logout').onclick = async ()=>{
+  try{ await fetch('/api/logout', { method:'POST', headers:{ authorization:'Bearer '+(localStorage.getItem('token')||'') } }) }catch{}
+  localStorage.removeItem('token'); location.href='/login.html'
+}
+
+who(); bindModalToggles(); loadHistory()
+
+// theme toggle (cyber -> light -> dark)
+function applyTheme(theme){
+  const root = document.documentElement
+  if(theme==='light' || theme==='cyber'){ root.setAttribute('data-theme', theme) }
+  else { root.removeAttribute('data-theme') }
+  const label = theme==='cyber' ? '赛博朋克' : (theme==='light' ? '亮色' : '暗色')
+  const btn = document.getElementById('themeToggle'); if(btn){ btn.textContent = '主题：' + label }
+}
+const modes = ['cyber','light','dark']
+let curTheme = localStorage.getItem('theme') || 'cyber'
+if(!modes.includes(curTheme)) curTheme = 'cyber'
+applyTheme(curTheme)
+document.getElementById('themeToggle').onclick = ()=>{
+  const idx = modes.indexOf(curTheme)
+  curTheme = modes[(idx+1)%modes.length]
+  localStorage.setItem('theme', curTheme)
+  applyTheme(curTheme)
+}
+</script>
+</body>
+</html>

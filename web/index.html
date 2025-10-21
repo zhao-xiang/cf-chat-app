@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>自由乌托邦 Free Utopia</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/guard.js?v=2"></script>
+</head>
+<body class="center">
+  <div class="card">
+  <h1 class="title"><span class="brand">自由乌托邦 Free Utopia</span></h1>
+    <p class="muted">正在跳转到登录页面…</p>
+    <div class="toolbar" style="margin-top:12px">
+      <a href="/login.html" class="btn">前往登录</a>
+      <a href="/register.html" class="btn secondary">注册</a>
+      <button id="themeToggle" class="btn secondary" style="margin-left:auto" title="切换主题">切换主题</button>
+    </div>
+  </div>
+  <script>
+    const token = localStorage.getItem('token')
+    if(token){ location.replace('/chat.html') } else { setTimeout(()=> location.replace('/login.html'), 600) }
+    // theme toggle (cyber -> light -> dark)
+    function applyTheme(theme){
+      const root = document.documentElement
+      if(theme==='light' || theme==='cyber'){ root.setAttribute('data-theme', theme) }
+      else { root.removeAttribute('data-theme') }
+      const label = theme==='cyber' ? '赛博朋克' : (theme==='light' ? '亮色' : '暗色')
+      const btn = document.getElementById('themeToggle'); if(btn){ btn.textContent = '主题：' + label }
+    }
+    const modes = ['cyber','light','dark']
+    let curTheme = localStorage.getItem('theme') || 'cyber'
+    if(!modes.includes(curTheme)) curTheme = 'cyber'
+    applyTheme(curTheme)
+    document.getElementById('themeToggle').onclick = ()=>{
+      const idx = modes.indexOf(curTheme)
+      curTheme = modes[(idx+1)%modes.length]
+      localStorage.setItem('theme', curTheme)
+      applyTheme(curTheme)
+    }
+  </script>
+</body>
+</html>
+
