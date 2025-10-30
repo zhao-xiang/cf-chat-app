@@ -230,8 +230,34 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
   return calc === stored
 }
 
+// Verify Cloudflare Turnstile token server-side
+async function verifyTurnstile(token: string, env: Env, remoteAddr?: string): Promise<boolean> {
+  try {
+    if (!env.TURNSTILE_SECRET) return false
+    const body = new URLSearchParams()
+    body.set('secret', env.TURNSTILE_SECRET)
+    body.set('response', token)
+    if (remoteAddr) body.set('remoteip', remoteAddr)
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    })
+
+    const j = await res.json()
+    return Boolean(j && j.success)
+  } catch (e) {
+    return false
+  }
+}
+
 app.post('/api/register', async (c) => {
   const raw = await c.req.json().catch(() => ({}))
+  // turnstile token required
+  const turnstileToken = (raw as any).turnstileToken || (raw as any).turnstile_token || ''
+  if (!turnstileToken) return c.json({ error: '缺少人机验证 token' }, 400)
+  const okTs = await verifyTurnstile(turnstileToken, c.env, c.req.header('cf-connecting-ip') || undefined)
+  if (!okTs) return c.json({ error: '人机验证失败' }, 400)
   let username: string, password: string
   try {
     ;({ username, password } = registerSchema.parse(raw))
@@ -250,6 +276,11 @@ app.post('/api/register', async (c) => {
 
 app.post('/api/login', async (c) => {
   const raw = await c.req.json().catch(() => ({}))
+  // turnstile token required
+  const turnstileToken = (raw as any).turnstileToken || (raw as any).turnstile_token || ''
+  if (!turnstileToken) return c.json({ error: '缺少人机验证 token' }, 400)
+  const okTs = await verifyTurnstile(turnstileToken, c.env, c.req.header('cf-connecting-ip') || undefined)
+  if (!okTs) return c.json({ error: '人机验证失败' }, 400)
   let username: string, password: string
   try {
     ;({ username, password } = loginSchema.parse(raw))

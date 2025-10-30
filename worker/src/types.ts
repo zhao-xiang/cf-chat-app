@@ -4,6 +4,7 @@ export interface Env {
   SESSIONS_KV: any
   AI: any
   ROOM: any
+  TURNSTILE_SECRET: string
 }
 
 export type User = {

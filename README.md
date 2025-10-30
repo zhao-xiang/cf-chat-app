@@ -48,6 +48,20 @@
    - DO 内处理 `kind:'ai'` 的消息：写入用户提问与 AI 回复到 D1，并仅向请求者回发。
    - REST：`POST /api/ai/chat` 直接返回模型文本输出。
 
+### Turnstile（人机验证）
+
+在注册与登录页面集成了 Turnstile，用于减少自动化滥用。
+
+- 前端（`web/register.html`、`web/login.html`）使用 sitekey：`0x4AAAAAAB9qtKMd4sjQ2fFD`。该 sitekey 写在页面上并由 Turnstile widget 获取 token 后随请求提交，部署时按实际 sitekey 修改 html。
+- 后端（Worker）需要一个 secret 用于服务器端验证。请不要把 secret 写到前端或仓库中，而应在 Cloudflare Worker 环境中以 secret 保存，例如使用 Wrangler：
+
+```cmd
+:: 在 worker 目录下运行（会要求你粘贴/输入 secret）
+npx wrangler secret put TURNSTILE_SECRET
+```
+
+当你部署或本地运行时，Worker 将通过 `TURNSTILE_SECRET` 与 Cloudflare 的验证接口（https://challenges.cloudflare.com/turnstile/v0/siteverify）验证 token，验证通过后才继续注册/登录流程。
+
 ## 开发/部署
 
 ### 1. 预备
@@ -96,6 +110,7 @@ npx wrangler dev --local --persist-to .wrangler/state
 
 ```cmd
 npx wrangler d1 migrations apply cf_chat_db --remote
+npx wrangler secret put TURNSTILE_SECRET
 npx wrangler deploy
 ```
 

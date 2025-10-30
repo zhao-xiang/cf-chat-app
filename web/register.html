@@ -6,6 +6,8 @@
   <title>注册 · Cloudflare Chat</title>
   <link rel="stylesheet" href="/styles.css" />
   <script src="/guard.js?v=2"></script>
+  <!-- Cloudflare Turnstile -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body class="center">
   <div class="card">
@@ -13,6 +15,9 @@
     <div class="col" style="margin-top:16px">
       <input id="username" class="input" placeholder="用户名（≥3）" />
       <input id="password" type="password" class="input" placeholder="密码（≥6）" />
+      <!-- Turnstile widget -->
+      <div id="turnstile-register" class="cf-turnstile" data-sitekey="0x4AAAAAAB9qtKMd4sjQ2fFD" data-callback="onTurnstileRegister"></div>
+      <input type="hidden" id="turnstileToken" />
       <div class="toolbar">
         <button id="btnRegister" class="btn">注册</button>
         <a href="/login.html" class="btn secondary">去登录</a>
@@ -22,12 +27,18 @@
     </div>
   </div>
 <script>
+// Turnstile callback
+function onTurnstileRegister(token){
+  try{ document.getElementById('turnstileToken').value = token }catch{}
+}
 async function register(){
   const username = document.getElementById('username').value.trim()
   const password = document.getElementById('password').value
+  const token = document.getElementById('turnstileToken').value || ''
   if(username.length < 3){ document.getElementById('msg').textContent = '用户名至少3个字符'; return }
   if(password.length < 6){ document.getElementById('msg').textContent = '密码至少6个字符'; return }
-  const r = await fetch('/api/register', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password }) })
+  if(!token){ document.getElementById('msg').textContent = '请完成人机验证'; return }
+  const r = await fetch('/api/register', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password, turnstileToken: token }) })
   const j = await r.json()
   if(r.ok && j.ok){ location.href = '/login.html' }
   else { document.getElementById('msg').textContent = j?.error || '注册失败' }

@@ -14,12 +14,12 @@ tag = "v1"
 
 [[kv_namespaces]]
 binding = "SESSIONS_KV"
-id = "a172ef37188b423184556e2d2eb33123"
+id = "a172ef37188b423184556e2d2e123456"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "cf_chat_db"
-database_id = "41f2f505-ef68-4ff1-b0d4-eda698715123"
+database_id = "41f2f505-ef68-4ff1-b0d4-eda698123456"
 migrations_dir = "worker/migrations"
 
 [[r2_buckets]]
@@ -30,8 +30,6 @@ binding = "AI"
 
 [observability]
 enabled = true
-
-[vars]
 
 [assets]
 directory = "./web"

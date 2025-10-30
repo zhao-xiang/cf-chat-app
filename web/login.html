@@ -6,6 +6,8 @@
   <title>登录 · 自由乌托邦 Free Utopia</title>
   <link rel="stylesheet" href="/styles.css" />
   <script src="/guard.js?v=2"></script>
+  <!-- Cloudflare Turnstile -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body class="center">
   <div class="card">
@@ -14,6 +16,9 @@
     <div class="col" style="margin-top:16px">
       <input id="username" class="input" placeholder="用户名" />
       <input id="password" type="password" class="input" placeholder="密码" />
+      <!-- Turnstile widget -->
+      <div id="turnstile-login" class="cf-turnstile" data-sitekey="0x4AAAAAAB9qtKMd4sjQ2fFD" data-callback="onTurnstileLogin"></div>
+      <input type="hidden" id="turnstileToken" />
       <div class="toolbar">
         <button id="btnLogin" class="btn">登录</button>
         <a href="/register.html" class="btn secondary">去注册</a>
@@ -23,6 +28,10 @@
     </div>
   </div>
 <script>
+(function(){
+  // Turnstile callback
+  window.onTurnstileLogin = function(token){ try{ document.getElementById('turnstileToken').value = token }catch{} }
+})();
 (async function(){
   let token = localStorage.getItem('token') || ''
   if(token){
@@ -36,15 +45,17 @@
 async function login(){
   const username = document.getElementById('username').value.trim()
   const password = document.getElementById('password').value
+  const tsToken = document.getElementById('turnstileToken').value || ''
   if(username.length < 3){ document.getElementById('msg').textContent = '用户名至少3个字符'; return }
   if(password.length < 6){ document.getElementById('msg').textContent = '密码至少6个字符'; return }
-  const r = await fetch('/api/login', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password }) })
+  if(!tsToken){ document.getElementById('msg').textContent = '请完成人机验证'; return }
+  const r = await fetch('/api/login', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password, turnstileToken: tsToken }) })
   const j = await r.json()
   if(r.ok && j.token){ localStorage.setItem('token', j.token); location.href = '/chat.html' }
   else if(r.status===409 && j?.code==='SESSION_EXISTS'){
     const yes = confirm('检测到已有在线会话，是否挤掉旧会话并登录？')
     if(yes){
-      const r2 = await fetch('/api/login', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password, force: true }) })
+      const r2 = await fetch('/api/login', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ username, password, force: true, turnstileToken: tsToken }) })
       const j2 = await r2.json()
       if(r2.ok && j2.token){ localStorage.setItem('token', j2.token); location.href = '/chat.html' }
       else { document.getElementById('msg').textContent = j2?.error || '登录失败' }
